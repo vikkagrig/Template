@@ -1,7 +1,8 @@
-﻿using Microsoft.Office.Interop.Excel;
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -15,9 +16,36 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using Excel = Microsoft.Office.Interop.Excel;
+using System.Text.Json;
+using Newtonsoft.Json.Serialization;
+using System.Reflection;
+using JsonProperty = Newtonsoft.Json.Serialization.JsonProperty;
+using Newtonsoft.Json.Converters;
+using Word = Microsoft.Office.Interop.Word;
 
 namespace Template_4337
 {
+    public class CustomDateTimeConverter : IsoDateTimeConverter
+    {
+        public CustomDateTimeConverter()
+        {
+            base.DateTimeFormat = "dd.mm.yyyy";
+        }
+    }
+    public class ShouldDeserializeContractResolver : DefaultContractResolver
+    {
+        public static new readonly ShouldDeserializeContractResolver Instance = new ShouldDeserializeContractResolver();
+        protected override JsonProperty CreateProperty(MemberInfo member, MemberSerialization memberSerialization)
+        {
+            JsonProperty property = base.CreateProperty(member, memberSerialization);
+            MethodInfo shouldDeserializeMethodInfo = member.DeclaringType.GetMethod("ShouldDeserialize" + member.Name);
+            if (shouldDeserializeMethodInfo != null)
+            {
+                property.ShouldDeserialize = o => { return (bool)shouldDeserializeMethodInfo.Invoke(o, null); };
+            }
+            return property;
+        }
+    }
     /// <summary>
     /// Логика взаимодействия для Grigoreva.xaml
     /// </summary>
@@ -134,6 +162,91 @@ namespace Template_4337
                 worksheet.Columns.AutoFit();
             }
             app.Visible = true;
+        }
+
+        private async void btn3_Click(object sender, RoutedEventArgs e)
+        {
+            OpenFileDialog ofd = new OpenFileDialog()
+            {
+                DefaultExt = "*.json",
+                Filter = "файл JSON (Spisok.json)|*.json",
+                Title = "Выберите файл данных"
+            };
+            if (!(ofd.ShowDialog() == true))
+                return;
+            using (StreamReader reader = new StreamReader(ofd.FileName))
+            {
+                var settings = new JsonSerializerSettings
+                {
+                    ContractResolver = ShouldDeserializeContractResolver.Instance
+                };
+                List<Clients> client = JsonConvert.DeserializeObject<List<Clients>>(await reader.ReadToEndAsync(), settings);
+                using (PROBEntities1 db = new PROBEntities1())
+                {
+                    db.Clients.RemoveRange(db.Clients);
+                    foreach(var c in client)
+                    {
+                        db.Clients.Add(c);
+                    }
+                    db.SaveChanges();
+                }
+                MessageBox.Show("Объекты добавлены в бд");
+            }
+        }
+
+        private void btn4_Click(object sender, RoutedEventArgs e)
+        {
+            List<Clients> allClients;
+            List<string> allStreets;
+            using (PROBEntities1 db = new PROBEntities1())
+            {
+                allClients = db.Clients.ToList().OrderBy(s => s.FIO).ToList();
+                var query = from s in db.Street select s.Street1;
+                allStreets = query.Distinct().ToList();
+                var clientsCategories = allClients.GroupBy(s => s.Street).ToList();
+                var app = new Word.Application();
+                Word.Document document = app.Documents.Add();
+                foreach (var group in clientsCategories)
+                {
+                    Word.Paragraph paragraph = document.Paragraphs.Add();
+                    Word.Range range = paragraph.Range;
+                    range.Text = allStreets.Where(g => g == group.Key).FirstOrDefault();
+                    paragraph.set_Style("Заголовок 1");
+                    range.InsertParagraphAfter();
+                    Word.Paragraph tableParagraph = document.Paragraphs.Add();
+                    Word.Range tableRange = tableParagraph.Range;
+                    Word.Table clientsTable = document.Tables.Add(tableRange, group.Count() + 1, 2);
+                    clientsTable.Borders.InsideLineStyle = clientsTable.Borders.OutsideLineStyle = Word.WdLineStyle.wdLineStyleSingle;
+                    clientsTable.Range.Cells.VerticalAlignment = Word.WdCellVerticalAlignment.wdCellAlignVerticalCenter;
+                    Word.Range cellRange;
+                    cellRange = clientsTable.Cell(1, 1).Range;
+                    cellRange.Text = "Порядковый номер";
+                    cellRange = clientsTable.Cell(1, 2).Range;
+                    cellRange.Text = "ФИО";
+                    clientsTable.Rows[1].Range.Bold = 1;
+                    clientsTable.Rows[1].Range.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+                    int i = 1;
+                    foreach (var currentClient in group)
+                    {
+                        cellRange = clientsTable.Cell(i + 1, 1).Range;
+                        cellRange.Text = currentClient.Code;
+                        cellRange.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+                        cellRange = clientsTable.Cell(i + 1, 2).Range;
+                        cellRange.Text = currentClient.FIO;
+                        cellRange.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+                        i++;
+                    }
+                    Word.Paragraph countStudentsParagraph = document.Paragraphs.Add();
+                    Word.Range countStudentsRange = countStudentsParagraph.Range;
+                    countStudentsRange.Text = $"Количество клиентов на данной улице - { group.Count() }";
+                    countStudentsRange.Font.Color = Word.WdColor.wdColorDarkRed;
+                    countStudentsRange.InsertParagraphAfter();
+                    document.Words.Last.InsertBreak(Word.WdBreakType.wdPageBreak);
+                }
+                app.Visible = true;
+                //document.SaveAs2(@"С:\outputFileWord.docx");
+                //document.SaveAs2(@"С:\outputFilePdf.pdf", Word.WdExportFormat.wdExportFormatPDF);
+            }
         }
     }
 }

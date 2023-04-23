@@ -9,19 +9,31 @@
 
 namespace Template_4337
 {
+    using Newtonsoft.Json;
     using System;
     using System.Collections.Generic;
     
     public partial class Clients
     {
+        [JsonProperty("CodeClient")]
         public string Code { get; set; }
+        [JsonProperty("FullName")]
         public string FIO { get; set; }
+        [JsonProperty("BirthDate")]
+        [JsonConverter(typeof(CustomDateTimeConverter))]
         public Nullable<System.DateTime> Birthday { get; set; }
         public string Index { get; set; }
         public string City { get; set; }
         public string Street { get; set; }
+        [JsonProperty("Home")]
         public Nullable<int> House { get; set; }
+        [JsonProperty("Kvartira")]
         public Nullable<int> Flat { get; set; }
+        [JsonProperty("E_mail")]
         public string Email { get; set; }
+    }
+    public class ClientsJson
+    {
+        public Clients clients { get; set; }
     }
 }
